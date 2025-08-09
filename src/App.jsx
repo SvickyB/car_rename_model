@@ -1,5 +1,5 @@
 import React from "react";
-import CarViewer from "./components/CarViewer";
+import CarViewer from "./components/ModelViewer";
 
 export default function App() {
   return (
