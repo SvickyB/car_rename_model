@@ -21,44 +21,53 @@ export default function ModelViewer() {
   const uploadedFileName = useRef("");
 
   const handleRename = () => {
-    if (selectedObj && newName.trim()) {
-      selectedObj.name = newName;
-      alert(`Renamed to: ${newName}`);
-      setNewName("");
-    }
-  };
+  if (!newName.trim()) return;
+
+  if (selectedObj) {
+    selectedObj.name = newName.trim();
+    setSelectedObj({ ...selectedObj }); // trigger re-render
+    setNewName("");
+  }
+};
+
 
   const handleExport = () => {
-    if (!sceneRef.current) {
-      alert("No model loaded");
-      return;
+  if (!modelName.trim()) {
+    alert("Please provide a name before exporting the model.");
+    return;
+  }
+
+  if (!sceneRef.current) {
+    alert("No model loaded");
+    return;
+  }
+
+  // Restore original materials
+  sceneRef.current.traverse((child) => {
+    if (child.isMesh && originalMaterials.current.has(child.uuid)) {
+      child.material = originalMaterials.current.get(child.uuid);
     }
+  });
 
-    // Restore original materials
-    sceneRef.current.traverse((child) => {
-      if (child.isMesh && originalMaterials.current.has(child.uuid)) {
-        child.material = originalMaterials.current.get(child.uuid);
+  const exporter = new GLTFExporter();
+  exporter.parse(
+    sceneRef.current,
+    (result) => {
+      const fileBaseName = modelName.trim();
+
+      if (result instanceof ArrayBuffer) {
+        const blob = new Blob([result], { type: "model/gltf-binary" });
+        saveAs(blob, `${fileBaseName}.glb`);
+      } else {
+        const json = JSON.stringify(result, null, 2);
+        const blob = new Blob([json], { type: "application/json" });
+        saveAs(blob, `${fileBaseName}.gltf`);
       }
-    });
+    },
+    { binary: true }
+  );
+};
 
-    const exporter = new GLTFExporter();
-    exporter.parse(
-      sceneRef.current,
-      (result) => {
-        const fileBaseName = modelName.trim() || "exported_model";
-
-        if (result instanceof ArrayBuffer) {
-          const blob = new Blob([result], { type: "model/gltf-binary" });
-          saveAs(blob, `${fileBaseName}.glb`);
-        } else {
-          const json = JSON.stringify(result, null, 2);
-          const blob = new Blob([json], { type: "application/json" });
-          saveAs(blob, `${fileBaseName}.gltf`);
-        }
-      },
-      { binary: true }
-    );
-  };
 
   const handleUpload = (e) => {
   const file = e.target.files[0];

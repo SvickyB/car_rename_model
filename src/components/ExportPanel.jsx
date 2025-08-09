@@ -1,6 +1,14 @@
 import React from "react";
 
 export default function ExportPanel({ modelName, setModelName, onExport }) {
+  const handleExportClick = () => {
+    if (!modelName.trim()) {
+      alert("Please provide a name before exporting the model.");
+      return;
+    }
+    onExport();
+  };
+
   return (
     <div
       style={{
@@ -21,7 +29,7 @@ export default function ExportPanel({ modelName, setModelName, onExport }) {
         style={{ padding: "4px", marginRight: "8px" }}
       />
       <button
-        onClick={onExport}
+        onClick={handleExportClick}
         style={{
           padding: "8px 16px",
           background: "#333",
