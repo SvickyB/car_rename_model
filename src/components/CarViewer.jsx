@@ -1,62 +1,29 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Canvas } from "@react-three/fiber";
-import {
-  OrbitControls,
-  Stage,
-  ContactShadows,
-  Bounds,
-} from "@react-three/drei";
+import { OrbitControls, ContactShadows } from "@react-three/drei";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter";
 import { saveAs } from "file-saver";
 
-function SelectableModel({
-  onSelect,
-  selectedObject,
-  scene,
-  setSceneRef,
-  setOriginalMaterials,
-}) {
+function SelectableModel({ onSelect, selectedObject, scene, originalMaterials }) {
   useEffect(() => {
     if (!scene) return;
 
-    const materialMap = new Map();
+    // Restore original materials
     scene.traverse((child) => {
-      if (child.isMesh) {
-        child.userData.selectable = true;
-        materialMap.set(child.uuid, child.material.clone());
+      if (child.isMesh && originalMaterials.has(child.uuid)) {
+        child.material = originalMaterials.get(child.uuid).clone();
       }
     });
 
-    setOriginalMaterials(materialMap);
-    setSceneRef(scene);
-  }, [scene]);
-
-  useEffect(() => {
-    if (!scene) return;
-
-    scene.traverse((child) => {
-      if (child.isMesh) {
-        child.material.emissive = new THREE.Color(0x000000);
-        child.material.emissiveIntensity = 0;
-      }
-    });
-
-    if (selectedObject) {
-      const parentGroup =
-        selectedObject.parent?.children?.length > 1
-          ? selectedObject.parent
-          : selectedObject;
-
-      parentGroup.traverse((child) => {
-        if (child.isMesh) {
-          child.material.emissive = new THREE.Color("yellow");
-          child.material.emissiveIntensity = 1.5;
-        }
-      });
+    // Highlight only selected mesh
+    if (selectedObject && selectedObject.isMesh) {
+      selectedObject.material = selectedObject.material.clone();
+      selectedObject.material.emissive = new THREE.Color("yellow");
+      selectedObject.material.emissiveIntensity = 1.5;
     }
-  }, [selectedObject, scene]);
+  }, [selectedObject, scene, originalMaterials]);
 
   if (!scene) return null;
 
@@ -79,9 +46,11 @@ function ModelViewer() {
   const [selectedObj, setSelectedObj] = useState(null);
   const [newName, setNewName] = useState("");
   const [uploadedScene, setUploadedScene] = useState(null);
+  const [modelName, setModelName] = useState(""); // ✅ Added missing state
 
   const sceneRef = useRef(null);
   const originalMaterials = useRef(new Map());
+  const uploadedFileName = useRef("");
 
   const handleRename = () => {
     if (selectedObj && newName.trim()) {
@@ -97,6 +66,7 @@ function ModelViewer() {
       return;
     }
 
+    // Restore original materials before export
     sceneRef.current.traverse((child) => {
       if (child.isMesh && originalMaterials.current.has(child.uuid)) {
         child.material = originalMaterials.current.get(child.uuid);
@@ -107,13 +77,15 @@ function ModelViewer() {
     exporter.parse(
       sceneRef.current,
       (result) => {
+        const fileBaseName = modelName.trim() || "exported_model";
+
         if (result instanceof ArrayBuffer) {
           const blob = new Blob([result], { type: "model/gltf-binary" });
-          saveAs(blob, "renamed_model.glb");
+          saveAs(blob, `${fileBaseName}.glb`);
         } else {
           const json = JSON.stringify(result, null, 2);
           const blob = new Blob([json], { type: "application/json" });
-          saveAs(blob, "renamed_model.gltf");
+          saveAs(blob, `${fileBaseName}.gltf`);
         }
       },
       { binary: true }
@@ -124,20 +96,32 @@ function ModelViewer() {
     const file = e.target.files[0];
     if (!file) return;
 
+    uploadedFileName.current = file.name;
+
     const reader = new FileReader();
     reader.onload = (event) => {
       const contents = event.target.result;
       const loader = new GLTFLoader();
       loader.parse(contents, "", (gltf) => {
         const scene = gltf.scene;
+
+        // Center model
+        const box = new THREE.Box3().setFromObject(scene);
+        const center = box.getCenter(new THREE.Vector3());
+        scene.position.sub(center);
+
+        // Mark meshes as selectable
         scene.traverse((child) => {
           if (child.isMesh) {
             child.userData.selectable = true;
           }
         });
-        setUploadedScene(scene);
-        sceneRef.current = scene;
 
+        // Save to refs/state
+        sceneRef.current = scene;
+        setUploadedScene(scene);
+
+        // Store original materials
         const materialMap = new Map();
         scene.traverse((child) => {
           if (child.isMesh) {
@@ -145,6 +129,9 @@ function ModelViewer() {
           }
         });
         originalMaterials.current = materialMap;
+
+        // Reset selection
+        setSelectedObj(null);
       });
     };
     reader.readAsArrayBuffer(file);
@@ -152,7 +139,7 @@ function ModelViewer() {
 
   return (
     <>
-      {/* Upload Button */}
+      {/* Upload */}
       <div style={{ position: "absolute", top: 40, right: 20, zIndex: 1 }}>
         <input
           type="file"
@@ -178,21 +165,19 @@ function ModelViewer() {
         }}
       >
         <Canvas shadows camera={{ position: [2, 2, 5], fov: 45 }}>
-          <ambientLight intensity={1} />
-          <directionalLight position={[10, 10, 10]} intensity={2} castShadow />
-          <Stage environment="city" intensity={0.6} shadows adjustCamera>
-            <Bounds fit clip observe margin={1.2}>
-              <SelectableModel
-                onSelect={setSelectedObj}
-                selectedObject={selectedObj}
-                scene={uploadedScene}
-                setSceneRef={(scene) => (sceneRef.current = scene)}
-                setOriginalMaterials={(materials) =>
-                  (originalMaterials.current = materials)
-                }
-              />
-            </Bounds>
-          </Stage>
+          <ambientLight intensity={1.5} />
+          <directionalLight position={[5, 5, 5]} intensity={3} castShadow />
+
+          {uploadedScene && (
+            <SelectableModel
+              key={uploadedScene.uuid} // ✅ force remount
+              onSelect={setSelectedObj}
+              selectedObject={selectedObj}
+              scene={uploadedScene}
+              originalMaterials={originalMaterials.current}
+            />
+          )}
+
           <OrbitControls enablePan enableZoom enableRotate />
           <ContactShadows
             position={[0, -0.8, 0]}
@@ -241,23 +226,38 @@ function ModelViewer() {
 
       {/* Export Button */}
       {uploadedScene && (
-        <button
-          onClick={handleExport}
+        <div
           style={{
             position: "absolute",
-            bottom: 20,
+            bottom: 60,
             left: 20,
-            padding: "10px 20px",
-            background: "#333",
-            color: "white",
-            border: "none",
+            background: "#fff",
+            padding: "8px",
             borderRadius: "6px",
-            cursor: "pointer",
             zIndex: 2,
           }}
         >
-          Export Renamed Model
-        </button>
+          <input
+            type="text"
+            value={modelName}
+            onChange={(e) => setModelName(e.target.value)}
+            placeholder="Enter export name"
+            style={{ padding: "4px", marginRight: "8px" }}
+          />
+          <button
+            onClick={handleExport}
+            style={{
+              padding: "8px 16px",
+              background: "#333",
+              color: "white",
+              border: "none",
+              borderRadius: "6px",
+              cursor: "pointer",
+            }}
+          >
+            Export Model
+          </button>
+        </div>
       )}
     </>
   );
